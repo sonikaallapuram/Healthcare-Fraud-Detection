@@ -1,10 +1,5 @@
 # 🏥 Healthcare Insurance Fraud Detection
 
-![Python](https://img.shields.io/badge/Python-3.x-blue)
-![Streamlit](https://img.shields.io/badge/Streamlit-Dashboard-red)
-![XGBoost](https://img.shields.io/badge/Model-XGBoost-green)
-![License](https://img.shields.io/badge/License-Educational-yellow)
-
 ## 📌 Project Overview
 An end-to-end Data Science project that uses Machine Learning to automatically detect fraudulent healthcare insurance claims. This project analyzes over 558,000 real world healthcare claims using XGBoost classifier with SMOTE balancing and SHAP explainability.
 
@@ -140,10 +135,6 @@ streamlit run app.py
 ## 🌐 Live Demo
 Click here to view live dashboard - Update this link after deployment
 
-## 👩‍💻 Author
-- Name: Ms. Allapuram Sonika
-- Department: Electronics and Communication Engineering
-- College: BVRIT Hyderabad College of Engineering for Women
+📄 License This project is licensed under the MIT License.
 
-## 📄 License
-This project is created for educational purposes only.
+💡 This project reflects my journey as a student developer aspiring to build real-world applications. While not yet perfect, I’m committed to learning and improving it step by step.
