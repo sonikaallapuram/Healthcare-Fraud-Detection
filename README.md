@@ -6,7 +6,13 @@ An end-to-end Data Science project that uses Machine Learning to automatically d
 ## 🎯 Problem Statement
 Healthcare insurance fraud costs billions of dollars annually, placing a massive burden on patients, insurers, and the healthcare system. Fraudulent claims continue to rise, making it increasingly difficult for insurance companies to identify them manually. This project uses Machine Learning to automatically detect fraudulent claims and provide actionable business insights.
 
+⚠️ Note: This project is a work in progress. Some features are incomplete, and bugs may exist. I am continuously learning and improving the project over time.
+
 ## 📸 Screenshots
+
+**. Overview**
+<img width="1316" height="610" alt="image" src="https://github.com/user-attachments/assets/38af8815-22dd-4f2c-bed3-ff27eab99f5f" />
+
 
 ### 🏠 Project Overview
 ![Overview](screenshots/screenshot_overview.png)
@@ -134,6 +140,8 @@ streamlit run app.py
 
 ## 🌐 Live Demo
 [🚀 Click here to view live dashboard](https://healthcare-fraud-detection-sonika.streamlit.app/)
+
+🤝 Contributing Suggestions and feedback are always welcome:
 
 📄 License This project is licensed under the MIT License.
 
