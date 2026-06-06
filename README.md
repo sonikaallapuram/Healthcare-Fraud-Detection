@@ -13,18 +13,9 @@ Healthcare insurance fraud costs billions of dollars annually, placing a massive
 **. Overview**
 <img width="1316" height="610" alt="image" src="https://github.com/user-attachments/assets/38af8815-22dd-4f2c-bed3-ff27eab99f5f" />
 
+**.Fraud Prediction**
 
-### 🏠 Project Overview
-![Overview](screenshots/screenshot_overview.png)
-
-### 📊 Data Analysis
-![Analysis](screenshots/screenshot_analysis.png)
-
-### 🤖 Model Performance
-![Model](screenshots/screenshot_model.png)
-
-### 🔍 Fraud Prediction
-![Prediction](screenshots/screenshot_prediction.png)
+<img width="1323" height="588" alt="image" src="https://github.com/user-attachments/assets/ffdefb28-2c56-4e4d-9130-5f1491196afa" />
 
 ## 📊 Dataset
 - Source: Kaggle - Healthcare Provider Fraud Detection Analysis
