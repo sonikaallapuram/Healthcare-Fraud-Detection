@@ -1,18 +1,18 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import pickle
 import matplotlib.pyplot as plt
 import seaborn as sns
+import pickle
+from sklearn.metrics import confusion_matrix, roc_curve, auc, accuracy_score
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
 import warnings
+warnings.filterwarnings('ignore')
 
-from sklearn.metrics import accuracy_score, confusion_matrix, roc_curve, auc, classification_report
-
-warnings.filterwarnings("ignore")
-
-# =====================================================
-# PAGE CONFIG
-# =====================================================
+# ================================
+# Page Configuration
+# ================================
 st.set_page_config(
     page_title="Healthcare Fraud Detection",
     page_icon="🏥",
@@ -20,565 +20,675 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# =====================================================
-# CSS
-# =====================================================
+# ================================
+# Custom CSS
+# ================================
 st.markdown("""
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+* { font-family: 'Inter', sans-serif; }
+
 .stApp {
-    background: #f6f8ff;
+    background: #f8faff;
 }
 
 [data-testid="stSidebar"] {
-    background: linear-gradient(180deg, #0f172a, #1e3a8a);
+    background: linear-gradient(180deg, #0f172a 0%, #1e3a5f 100%);
 }
 
 [data-testid="stSidebar"] * {
     color: white !important;
 }
 
-.banner {
-    background: linear-gradient(135deg, #1e3a8a, #2563eb);
-    padding: 35px;
-    border-radius: 22px;
-    color: white;
-    margin-bottom: 28px;
-}
-
-.metric-card {
-    background: white;
-    padding: 24px;
-    border-radius: 18px;
-    box-shadow: 0 4px 18px rgba(0,0,0,0.07);
-    border-top: 5px solid #2563eb;
-    margin-bottom: 18px;
-}
-
-.metric-title {
-    color: #64748b;
-    font-size: 13px;
-    font-weight: 800;
-    text-transform: uppercase;
-}
-
-.metric-value {
-    font-size: 32px;
-    font-weight: 900;
-    margin-top: 8px;
-}
+#MainMenu {visibility: hidden;}
+footer {visibility: hidden;}
+header {visibility: hidden;}
 
 .stButton > button {
-    background: linear-gradient(135deg, #dc2626, #ef4444);
-    color: white;
-    font-size: 17px;
-    font-weight: 800;
-    border-radius: 12px;
-    padding: 12px;
-    border: none;
+    background: linear-gradient(135deg, #2563eb, #1d4ed8) !important;
+    color: white !important;
+    border: none !important;
+    border-radius: 10px !important;
+    padding: 14px 32px !important;
+    font-size: 16px !important;
+    font-weight: 700 !important;
+    width: 100% !important;
+    box-shadow: 0 4px 15px rgba(37,99,235,0.4) !important;
+    transition: all 0.3s ease !important;
 }
 
-div[data-testid="stExpander"] {
-    background: white;
-    border-radius: 15px;
+.stButton > button:hover {
+    transform: translateY(-2px) !important;
+    box-shadow: 0 8px 25px rgba(37,99,235,0.5) !important;
 }
 </style>
 """, unsafe_allow_html=True)
 
-# =====================================================
-# LOAD DATA
-# =====================================================
+# ================================
+# Load Data
+# ================================
 @st.cache_data
 def load_data():
-    df = pd.read_csv("cleaned_data.csv", low_memory=False)
+    return pd.read_csv('cleaned_data.csv')
 
-    if df["PotentialFraud"].dtype == "object":
-        df["PotentialFraud"] = df["PotentialFraud"].map({
-            "Yes": 1,
-            "No": 0,
-            "Y": 1,
-            "N": 0
-        })
-
-    df["PotentialFraud"] = df["PotentialFraud"].astype(int)
-    return df
-
-
-claims_raw = load_data()
-raw_missing_values = claims_raw.isnull().sum().sum()
-
-# =====================================================
-# LOAD MODEL + SCALER
-# =====================================================
 @st.cache_resource
-def load_model_scaler():
-    with open("fraud_model.pkl", "rb") as f:
+def load_model():
+    with open('fraud_model.pkl', 'rb') as f:
         model = pickle.load(f)
+    return model
 
-    with open("scaler.pkl", "rb") as f:
+@st.cache_resource
+def load_scaler():
+    with open('scaler.pkl', 'rb') as f:
         scaler = pickle.load(f)
+    return scaler
 
-    return model, scaler
+claims = load_data()
+model = load_model()
+scaler = load_scaler()
 
-
-model, scaler = load_model_scaler()
-model_features = list(scaler.feature_names_in_)
-
-claims = claims_raw.copy()
-
-for col in model_features:
-    claims[col] = pd.to_numeric(claims[col], errors="coerce")
-
-claims[model_features] = claims[model_features].replace([np.inf, -np.inf], np.nan)
-claims[model_features] = claims[model_features].fillna(0)
-
-cleaned_missing_values = claims[model_features].isnull().sum().sum()
-
-# =====================================================
-# HELPER FUNCTIONS
-# =====================================================
-def banner(title, subtitle):
-    st.markdown(f"""
-    <div class="banner">
-        <h1>{title}</h1>
-        <h3>{subtitle}</h3>
-    </div>
-    """, unsafe_allow_html=True)
-
-
-def metric_card(title, value, color):
-    st.markdown(f"""
-    <div class="metric-card" style="border-top-color:{color};">
-        <div class="metric-title">{title}</div>
-        <div class="metric-value" style="color:{color};">{value}</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-
-def predict_from_row(row_dict):
-    input_df = pd.DataFrame(
-        [[row_dict.get(col, 0) for col in model_features]],
-        columns=model_features
-    )
-
-    input_df = input_df.replace([np.inf, -np.inf], np.nan).fillna(0)
-    input_scaled = scaler.transform(input_df)
-
-    probability = model.predict_proba(input_scaled)[0][1]
-    prediction = 1 if probability >= 0.5 else 0
-
-    return prediction, probability, input_df
-
-
-def get_model_predicted_example(target_prediction):
-    sample_df = claims.sample(min(10000, len(claims)), random_state=42).copy()
-
-    X_sample = sample_df[model_features]
-    X_sample = X_sample.replace([np.inf, -np.inf], np.nan).fillna(0)
-
-    X_scaled = scaler.transform(X_sample)
-
-    probs = model.predict_proba(X_scaled)[:, 1]
-    preds = (probs >= 0.5).astype(int)
-
-    sample_df["model_prediction"] = preds
-    sample_df["fraud_probability"] = probs
-
-    matched = sample_df[sample_df["model_prediction"] == target_prediction]
-
-    if len(matched) == 0:
-        return None
-
-    if target_prediction == 0:
-        selected_row = matched.sort_values("fraud_probability", ascending=True).iloc[0]
-    else:
-        selected_row = matched.sort_values("fraud_probability", ascending=False).iloc[0]
-
-    return selected_row[model_features].to_dict()
-
-
-# =====================================================
-# SIDEBAR
-# =====================================================
+# ================================
+# Sidebar
+# ================================
 with st.sidebar:
     st.markdown("""
-    <div style="text-align:center;">
-        <h1>🏥</h1>
-        <h2>FraudShield AI</h2>
-        <p>Healthcare Fraud Detection</p>
+    <div style='text-align:center; padding:20px 0 10px 0;'>
+        <div style='font-size:40px;'>🏥</div>
+        <div style='font-size:20px; font-weight:800; color:white;'>FraudShield AI</div>
+        <div style='font-size:12px; color:rgba(255,255,255,0.6); margin-top:4px;'>Healthcare Fraud Detection</div>
     </div>
     """, unsafe_allow_html=True)
 
-    page = st.radio(
-        "Navigation",
-        [
-            "🏠 Project Overview",
-            "📊 Data Analysis",
-            "🤖 Model Performance",
-            "🔍 Fraud Prediction"
-        ]
-    )
+    st.markdown("<hr style='border-color:rgba(255,255,255,0.1);'>", unsafe_allow_html=True)
 
-# =====================================================
-# COMMON METRICS
-# =====================================================
-total_claims = len(claims)
-fraud_cases = int(claims["PotentialFraud"].sum())
-legit_cases = total_claims - fraud_cases
-fraud_rate = round(claims["PotentialFraud"].mean() * 100, 2)
-
-# =====================================================
-# PAGE 1: OVERVIEW
-# =====================================================
-if page == "🏠 Project Overview":
-    banner(
-        "🏥 Healthcare Insurance Fraud Detection",
-        "End-to-end machine learning dashboard to detect fraudulent insurance claims"
-    )
-
-    c1, c2, c3, c4 = st.columns(4)
-
-    with c1:
-        metric_card("Total Claims", f"{total_claims:,}", "#2563eb")
-    with c2:
-        metric_card("Fraud Cases", f"{fraud_cases:,}", "#dc2626")
-    with c3:
-        metric_card("Legitimate Claims", f"{legit_cases:,}", "#059669")
-    with c4:
-        metric_card("Fraud Rate", f"{fraud_rate}%", "#d97706")
-
-    st.markdown("### 📌 Problem Statement")
-    st.info("""
-    Healthcare insurance fraud causes huge financial losses every year.
-    This project uses machine learning to analyze healthcare claims and detect suspicious fraud patterns.
-    """)
-
-    st.markdown("### 🗂 Dataset Preview")
-    st.dataframe(claims.head(10), use_container_width=True)
-
-    st.markdown("### 📊 Fraud Distribution")
-    fig, ax = plt.subplots(figsize=(7, 4))
-    counts = claims["PotentialFraud"].value_counts().sort_index()
-    ax.bar(["Legitimate", "Fraud"], counts.values, color=["#059669", "#dc2626"])
-    ax.set_ylabel("Count")
-    st.pyplot(fig)
-
-# =====================================================
-# PAGE 2: DATA ANALYSIS
-# =====================================================
-elif page == "📊 Data Analysis":
-    banner(
+    page = st.selectbox("Navigate To", [
+        "🏠 Overview",
         "📊 Data Analysis",
-        "Explore claim patterns, fraud distribution, missing values and feature relationships"
-    )
-
-    c1, c2, c3, c4 = st.columns(4)
-
-    with c1:
-        metric_card("Rows", f"{claims.shape[0]:,}", "#2563eb")
-    with c2:
-        metric_card("Model Features", f"{len(model_features)}", "#7c3aed")
-    with c3:
-        metric_card("Raw Missing Values", f"{raw_missing_values:,}", "#dc2626")
-    with c4:
-        metric_card("After Cleaning", f"{cleaned_missing_values:,}", "#059669")
-
-    st.success("For model prediction, missing values are cleaned before passing data to the scaler/model.")
-
-    if "InscClaimAmtReimbursed" in claims.columns:
-        st.markdown("### 💰 Claim Amount Distribution")
-        fig, ax = plt.subplots(figsize=(9, 4))
-        sns.histplot(claims["InscClaimAmtReimbursed"], bins=50, ax=ax)
-        st.pyplot(fig)
-
-        st.markdown("### 🚨 Fraud vs Claim Amount")
-        fig, ax = plt.subplots(figsize=(9, 4))
-        sns.boxplot(
-            x="PotentialFraud",
-            y="InscClaimAmtReimbursed",
-            data=claims,
-            ax=ax
-        )
-        ax.set_xticklabels(["Legitimate", "Fraud"])
-        st.pyplot(fig)
-
-    st.markdown("### 🔥 Correlation Heatmap")
-    numeric_cols = model_features[:20]
-    fig, ax = plt.subplots(figsize=(14, 7))
-    sns.heatmap(claims[numeric_cols].corr(), cmap="coolwarm", ax=ax)
-    st.pyplot(fig)
-
-# =====================================================
-# PAGE 3: MODEL PERFORMANCE
-# =====================================================
-elif page == "🤖 Model Performance":
-    banner(
         "🤖 Model Performance",
-        "Saved XGBClassifier performance on cleaned project dataset"
-    )
+        "🔍 Predict Fraud"
+    ])
 
-    # sample for speed
-    # sample for speed
-    performance_df = claims.sample(min(15000, len(claims)), random_state=42)
+    st.markdown("<hr style='border-color:rgba(255,255,255,0.1);'>", unsafe_allow_html=True)
 
-    X = performance_df[model_features]
-    y = performance_df["PotentialFraud"]
+    total = len(claims)
+    fraud = int(claims['PotentialFraud'].sum())
+    legit = total - fraud
+    fraud_pct = round(claims['PotentialFraud'].mean() * 100, 2)
 
-    X_scaled = scaler.transform(X)
+    st.markdown(f"""
+    <div style='padding:0 10px;'>
+        <div style='background:rgba(255,255,255,0.08); border-radius:12px; padding:14px; margin-bottom:10px;'>
+            <div style='font-size:11px; color:rgba(255,255,255,0.5); text-transform:uppercase; letter-spacing:1px;'>Total Claims</div>
+            <div style='font-size:22px; font-weight:800; color:white;'>{total:,}</div>
+        </div>
+        <div style='background:rgba(239,68,68,0.15); border-radius:12px; padding:14px; margin-bottom:10px; border:1px solid rgba(239,68,68,0.3);'>
+            <div style='font-size:11px; color:rgba(255,255,255,0.5); text-transform:uppercase; letter-spacing:1px;'>Fraud Cases</div>
+            <div style='font-size:22px; font-weight:800; color:#f87171;'>{fraud:,}</div>
+        </div>
+        <div style='background:rgba(34,197,94,0.15); border-radius:12px; padding:14px; margin-bottom:10px; border:1px solid rgba(34,197,94,0.3);'>
+            <div style='font-size:11px; color:rgba(255,255,255,0.5); text-transform:uppercase; letter-spacing:1px;'>Legitimate</div>
+            <div style='font-size:22px; font-weight:800; color:#4ade80;'>{legit:,}</div>
+        </div>
+        <div style='background:rgba(251,191,36,0.15); border-radius:12px; padding:14px; border:1px solid rgba(251,191,36,0.3);'>
+            <div style='font-size:11px; color:rgba(255,255,255,0.5); text-transform:uppercase; letter-spacing:1px;'>Fraud Rate</div>
+            <div style='font-size:22px; font-weight:800; color:#fbbf24;'>{fraud_pct}%</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
-    y_prob = model.predict_proba(X_scaled)[:, 1]
-    y_pred = (y_prob >= 0.5).astype(int)
+# ================================
+# Helper Functions
+# ================================
+def metric_card(label, value, color="#2563eb"):
+    return f"""
+    <div style='background:white; border-radius:16px; padding:24px;
+                box-shadow:0 2px 15px rgba(0,0,0,0.06);
+                border-top:4px solid {color};'>
+        <div style='font-size:12px; font-weight:600; color:#6b7280;
+                    text-transform:uppercase; letter-spacing:1px; margin-bottom:10px;'>{label}</div>
+        <div style='font-size:28px; font-weight:800; color:{color};'>{value}</div>
+    </div>
+    """
 
-    # Use final notebook metrics
-    accuracy = 90.28
+def section_card_start(title):
+    return f"""
+    <div style='background:white; border-radius:16px; padding:28px;
+                box-shadow:0 2px 15px rgba(0,0,0,0.06); margin-bottom:24px;'>
+        <div style='font-size:17px; font-weight:700; color:#111827;
+                    margin-bottom:20px; padding-bottom:12px;
+                    border-bottom:2px solid #f3f4f6;'>{title}</div>
+    """
 
-    fpr, tpr, _ = roc_curve(y, y_prob)
+def header_banner(title, subtitle, color1="#1e3a5f", color2="#2563eb"):
+    return f"""
+    <div style='background:linear-gradient(135deg, {color1} 0%, {color2} 100%);
+                padding:32px 40px; border-radius:20px; margin-bottom:28px;
+                box-shadow:0 10px 40px rgba(37,99,235,0.25);'>
+        <h1 style='color:white; font-size:28px; font-weight:800; margin:0;'>{title}</h1>
+        <p style='color:rgba(255,255,255,0.75); font-size:15px; margin:8px 0 0 0;'>{subtitle}</p>
+    </div>
+    """
 
-    # Use final notebook AUC
-    roc_auc = 0.97
-    c1, c2, c3 = st.columns(3)
+# ================================
+# PAGE 1 - Overview
+# ================================
+if page == "🏠 Overview":
 
-    with c1:
-        metric_card("Accuracy", f"{accuracy}%", "#2563eb")
-    with c2:
-        metric_card("AUC Score", f"{roc_auc}", "#059669")
-    with c3:
-        metric_card("Algorithm", type(model).__name__, "#7c3aed")
+    st.markdown(header_banner(
+        "🏥 Healthcare Insurance Fraud Detection",
+        "End-to-end Machine Learning project detecting fraudulent insurance claims automatically"
+    ), unsafe_allow_html=True)
 
-    c1, c2 = st.columns(2)
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.markdown(metric_card("📋 Total Claims", f"{len(claims):,}", "#2563eb"), unsafe_allow_html=True)
+    with col2:
+        st.markdown(metric_card("🚨 Fraud Cases", f"{int(claims['PotentialFraud'].sum()):,}", "#dc2626"), unsafe_allow_html=True)
+    with col3:
+        st.markdown(metric_card("✅ Legitimate", f"{len(claims) - int(claims['PotentialFraud'].sum()):,}", "#059669"), unsafe_allow_html=True)
+    with col4:
+        st.markdown(metric_card("⚠️ Fraud Rate", f"{round(claims['PotentialFraud'].mean()*100,2)}%", "#d97706"), unsafe_allow_html=True)
 
-    with c1:
-        st.markdown("### 📊 Confusion Matrix")
-        cm = confusion_matrix(y, y_pred)
-        fig, ax = plt.subplots(figsize=(6, 5))
-        sns.heatmap(
-            cm,
-            annot=True,
-            fmt="d",
-            cmap="Blues",
-            xticklabels=["Legitimate", "Fraud"],
-            yticklabels=["Legitimate", "Fraud"],
-            ax=ax
-        )
-        ax.set_xlabel("Predicted")
-        ax.set_ylabel("Actual")
-        st.pyplot(fig)
+    st.markdown("<br>", unsafe_allow_html=True)
 
-    with c2:
-        st.markdown("### 📈 ROC Curve")
-        fig, ax = plt.subplots(figsize=(6, 5))
-        ax.plot(fpr, tpr, label=f"AUC = {roc_auc}")
-        ax.plot([0, 1], [0, 1], linestyle="--")
-        ax.set_xlabel("False Positive Rate")
-        ax.set_ylabel("True Positive Rate")
-        ax.legend()
-        st.pyplot(fig)
+    col1, col2 = st.columns([1,1])
 
-    st.markdown("### ⭐ Top Important Features")
-    if hasattr(model, "feature_importances_"):
-        importance_df = pd.DataFrame({
-            "Feature": model_features,
-            "Importance": model.feature_importances_
-        }).sort_values("Importance", ascending=False).head(15)
+    with col1:
+        st.markdown(section_card_start("📌 Problem Statement"), unsafe_allow_html=True)
+        st.markdown("""
+        <div style='background:#eff6ff; border-left:4px solid #2563eb;
+                    border-radius:8px; padding:18px; margin-bottom:16px;'>
+            <p style='color:#1e40af; font-size:14px; line-height:1.8; margin:0;'>
+            Healthcare insurance fraud costs billions of dollars annually, placing a massive
+            burden on patients, insurers, and the healthcare system. Fraudulent claims continue
+            to rise, making it increasingly difficult for insurance companies to identify
+            them manually. This project uses Machine Learning to automatically detect
+            fraudulent claims and provide actionable business insights.
+            </p>
+        </div>
+        </div>
+        """, unsafe_allow_html=True)
 
-        fig, ax = plt.subplots(figsize=(10, 6))
-        sns.barplot(data=importance_df, x="Importance", y="Feature", ax=ax)
-        st.pyplot(fig)
+    with col2:
+        st.markdown(section_card_start("🎯 Project Pipeline"), unsafe_allow_html=True)
+        steps = [
+            ("1", "Data Collection and EDA", "Analyzed 558K+ healthcare claims", "#2563eb"),
+            ("2", "Data Cleaning and Engineering", "Created 50+ meaningful features", "#7c3aed"),
+            ("3", "Model Building", "XGBoost with SMOTE balancing", "#059669"),
+            ("4", "Model Evaluation", "90.28% accuracy, AUC 0.97", "#dc2626"),
+            ("5", "Dashboard Deployment", "Interactive Streamlit dashboard", "#d97706"),
+        ]
+        for num, title, desc, color in steps:
+            st.markdown(f"""
+            <div style='display:flex; align-items:center; gap:14px;
+                        padding:10px 0; border-bottom:1px solid #f9fafb;'>
+                <div style='width:32px; height:32px; border-radius:50%;
+                            background:{color}; color:white; font-weight:800;
+                            font-size:14px; display:flex; align-items:center;
+                            justify-content:center; flex-shrink:0;'>{num}</div>
+                <div>
+                    <div style='font-weight:700; color:#111827; font-size:14px;'>{title}</div>
+                    <div style='color:#6b7280; font-size:12px;'>{desc}</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 
-    st.markdown("### 📋 Classification Report")
-    report = classification_report(y, y_pred, output_dict=True)
-    st.dataframe(pd.DataFrame(report).transpose(), use_container_width=True)
+    col1, col2 = st.columns(2)
 
-# =====================================================
-# PAGE 4: FRAUD PREDICTION
-# =====================================================
-elif page == "🔍 Fraud Prediction":
-    banner(
-        "🔍 Fraud Prediction",
-        "Load real model-predicted examples or edit all 50 features"
-    )
-
-    st.info(f"Your saved model expects exactly **{len(model_features)} features**. This page sends all {len(model_features)} features to the model.")
-
-    if "selected_row" not in st.session_state:
-        st.session_state.selected_row = claims[model_features].median(numeric_only=True).to_dict()
-
-    if "input_version" not in st.session_state:
-        st.session_state.input_version = 0
-
-    c1, c2, c3 = st.columns(3)
-
-    with c1:
-        if st.button("✅ Load Legitimate Example"):
-            example = get_model_predicted_example(0)
-
-            if example is not None:
-                st.session_state.selected_row = example
-                st.session_state.input_version += 1
-                st.rerun()
-            else:
-                st.warning("No legitimate model prediction found.")
-
-    with c2:
-        if st.button("🚨 Load Fraud Example"):
-            example = get_model_predicted_example(1)
-
-            if example is not None:
-                st.session_state.selected_row = example
-                st.session_state.input_version += 1
-                st.rerun()
-            else:
-                st.warning("No fraud model prediction found.")
-
-    with c3:
-        if st.button("🔄 Reset Average Values"):
-            st.session_state.selected_row = claims[model_features].median(numeric_only=True).to_dict()
-            st.session_state.input_version += 1
-            st.rerun()
-
-    default_values = st.session_state.selected_row.copy()
-    version = st.session_state.input_version
-
-    st.markdown("### Quick Important Inputs")
-
-    q1, q2, q3 = st.columns(3)
-
-    with q1:
-        age = st.number_input(
-            "Patient Age",
-            min_value=0,
-            max_value=120,
-            value=int(default_values.get("Age", 70)),
-            key=f"age_{version}"
-        )
-
-        claim_amount = st.number_input(
-            "Claim Amount",
-            min_value=0,
-            max_value=1000000,
-            value=int(default_values.get("InscClaimAmtReimbursed", 8000)),
-            step=500,
-            key=f"claim_amount_{version}"
-        )
-
-        deductible = st.number_input(
-            "Deductible Amount",
-            min_value=0,
-            max_value=100000,
-            value=int(default_values.get("DeductibleAmtPaid", 1068)),
-            step=100,
-            key=f"deductible_{version}"
-        )
-
-    with q2:
-        claim_duration = st.number_input(
-            "Claim Duration Days",
-            min_value=0,
-            max_value=365,
-            value=int(default_values.get("ClaimDuration", 10)),
-            key=f"claim_duration_{version}"
-        )
-
-        hospital_stay = st.number_input(
-            "Hospital Stay Days",
-            min_value=0,
-            max_value=365,
-            value=int(default_values.get("HospitalStayDays", 5)),
-            key=f"hospital_stay_{version}"
-        )
-
-        is_deceased = st.selectbox(
-            "Is Patient Deceased?",
-            [0, 1],
-            index=int(default_values.get("IsDeceased", 0)),
-            format_func=lambda x: "No" if x == 0 else "Yes",
-            key=f"is_deceased_{version}"
-        )
-
-    with q3:
-        ip_reimb = st.number_input(
-            "IP Annual Reimbursement",
-            min_value=0,
-            max_value=1000000,
-            value=int(default_values.get("IPAnnualReimbursementAmt", 15000)),
-            step=500,
-            key=f"ip_reimb_{version}"
-        )
-
-        op_reimb = st.number_input(
-            "OP Annual Reimbursement",
-            min_value=0,
-            max_value=1000000,
-            value=int(default_values.get("OPAnnualReimbursementAmt", 4000)),
-            step=500,
-            key=f"op_reimb_{version}"
-        )
-
-        physicians = st.number_input(
-            "Number of Physicians",
-            min_value=0,
-            max_value=20,
-            value=int(default_values.get("NoOfPhysicians", 2)),
-            key=f"physicians_{version}"
-        )
-
-    input_values = default_values.copy()
-
-    quick_inputs = {
-        "Age": age,
-        "InscClaimAmtReimbursed": claim_amount,
-        "DeductibleAmtPaid": deductible,
-        "ClaimDuration": claim_duration,
-        "HospitalStayDays": hospital_stay,
-        "IsDeceased": is_deceased,
-        "IPAnnualReimbursementAmt": ip_reimb,
-        "OPAnnualReimbursementAmt": op_reimb,
-        "NoOfPhysicians": physicians,
-        "NumPhysicians": physicians,
-        "Num_Physicians": physicians
-    }
-
-    for key, value in quick_inputs.items():
-        if key in input_values:
-            input_values[key] = value
-
-    st.markdown("### Advanced: Edit All 50 Model Features")
-
-    with st.expander("Open all model features"):
-        cols = st.columns(3)
-
-        for i, feature in enumerate(model_features):
-            with cols[i % 3]:
-                input_values[feature] = st.number_input(
-                    feature,
-                    value=float(input_values.get(feature, 0)),
-                    key=f"{feature}_{version}"
-                )
-
-    if st.button("🔍 Predict Fraud"):
-        prediction, probability, input_df = predict_from_row(input_values)
-
-        fraud_probability = round(probability * 100, 2)
-        legit_probability = round(100 - fraud_probability, 2)
-
-        if probability >= 0.5:
-            st.error(f"🚨 FRAUD DETECTED — Fraud Probability: {fraud_probability}%")
-        else:
-            st.success(f"✅ CLAIM LOOKS LEGITIMATE — Fraud Probability: {fraud_probability}%")
-
-        st.markdown("### 📊 Prediction Probability")
+    with col1:
+        st.markdown(section_card_start("📊 Fraud Distribution"), unsafe_allow_html=True)
         fig, ax = plt.subplots(figsize=(7, 4))
-        ax.bar(
-            ["Legitimate", "Fraud"],
-            [legit_probability, fraud_probability],
-            color=["#059669", "#dc2626"]
-        )
-        ax.set_ylabel("Probability %")
-        ax.set_ylim(0, 100)
-
-        for i, value in enumerate([legit_probability, fraud_probability]):
-            ax.text(i, value + 1, f"{value}%", ha="center", fontweight="bold")
-
+        fig.patch.set_facecolor('white')
+        ax.set_facecolor('white')
+        counts = claims['PotentialFraud'].value_counts()
+        bars = ax.bar(['Legitimate', 'Fraud'], counts.values,
+                      color=['#059669', '#dc2626'], width=0.5,
+                      edgecolor='white', linewidth=2)
+        for bar, val in zip(bars, counts.values):
+            ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 2000,
+                    f'{val:,}', ha='center', fontweight='bold', fontsize=12)
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        plt.tight_layout()
         st.pyplot(fig)
+        plt.close()
+        st.markdown("</div>", unsafe_allow_html=True)
 
-        st.markdown("### 📋 Final 50 Features Sent to Model")
-        st.dataframe(input_df.T.rename(columns={0: "Value"}), use_container_width=True)
+    with col2:
+        st.markdown(section_card_start("🥧 Fraud Percentage"), unsafe_allow_html=True)
+        fig, ax = plt.subplots(figsize=(7, 4))
+        fig.patch.set_facecolor('white')
+        counts = claims['PotentialFraud'].value_counts()
+        wedges, texts, autotexts = ax.pie(
+            counts.values,
+            labels=['Legitimate', 'Fraud'],
+            colors=['#059669', '#dc2626'],
+            autopct='%1.1f%%',
+            startangle=90,
+            wedgeprops={'edgecolor': 'white', 'linewidth': 3}
+        )
+        for text in autotexts:
+            text.set_fontweight('bold')
+            text.set_fontsize(13)
+        plt.tight_layout()
+        st.pyplot(fig)
+        plt.close()
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown(section_card_start("🗂️ Dataset Preview"), unsafe_allow_html=True)
+    st.dataframe(claims.head(10), use_container_width=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# ================================
+# PAGE 2 - Data Analysis
+# ================================
+elif page == "📊 Data Analysis":
+
+    st.markdown(header_banner(
+        "📊 Exploratory Data Analysis",
+        "Deep dive into healthcare claims data to uncover fraud patterns and insights"
+    ), unsafe_allow_html=True)
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.markdown(metric_card("📋 Total Rows", f"{claims.shape[0]:,}", "#2563eb"), unsafe_allow_html=True)
+    with col2:
+        st.markdown(metric_card("📊 Features", f"{claims.shape[1]}", "#7c3aed"), unsafe_allow_html=True)
+    with col3:
+        st.markdown(metric_card("✅ Missing Values", "0", "#059669"), unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown(section_card_start("💰 Claim Amount Distribution"), unsafe_allow_html=True)
+        fig, ax = plt.subplots(figsize=(8, 4))
+        fig.patch.set_facecolor('white')
+        ax.set_facecolor('#fafbff')
+        ax.hist(claims['InscClaimAmtReimbursed'], bins=60,
+                color='#2563eb', alpha=0.85, edgecolor='white')
+        ax.set_xlabel('Claim Amount ($)', fontsize=11)
+        ax.set_ylabel('Frequency', fontsize=11)
+        ax.set_title('Distribution of Claim Amounts', fontsize=13, fontweight='bold')
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        plt.tight_layout()
+        st.pyplot(fig)
+        plt.close()
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    with col2:
+        st.markdown(section_card_start("🔍 Fraud vs Legitimate Claim Amounts"), unsafe_allow_html=True)
+        fig, ax = plt.subplots(figsize=(8, 4))
+        fig.patch.set_facecolor('white')
+        ax.set_facecolor('#fafbff')
+        fraud_amounts = claims[claims['PotentialFraud']==1]['InscClaimAmtReimbursed']
+        legit_amounts = claims[claims['PotentialFraud']==0]['InscClaimAmtReimbursed']
+        ax.hist(legit_amounts, bins=60, alpha=0.7, color='#059669', label='Legitimate', edgecolor='white')
+        ax.hist(fraud_amounts, bins=60, alpha=0.7, color='#dc2626', label='Fraud', edgecolor='white')
+        ax.set_xlabel('Claim Amount ($)', fontsize=11)
+        ax.set_ylabel('Frequency', fontsize=11)
+        ax.set_title('Claim Amount by Fraud Status', fontsize=13, fontweight='bold')
+        ax.legend(fontsize=11)
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        plt.tight_layout()
+        st.pyplot(fig)
+        plt.close()
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if 'Age' in claims.columns:
+            st.markdown(section_card_start("👤 Patient Age Distribution"), unsafe_allow_html=True)
+            fig, ax = plt.subplots(figsize=(8, 4))
+            fig.patch.set_facecolor('white')
+            ax.set_facecolor('#fafbff')
+            ax.hist(claims['Age'].dropna(), bins=30,
+                    color='#7c3aed', alpha=0.85, edgecolor='white')
+            ax.set_xlabel('Age', fontsize=11)
+            ax.set_ylabel('Frequency', fontsize=11)
+            ax.set_title('Patient Age Distribution', fontsize=13, fontweight='bold')
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+            plt.tight_layout()
+            st.pyplot(fig)
+            plt.close()
+            st.markdown("</div>", unsafe_allow_html=True)
+
+    with col2:
+        if 'IsDeceased' in claims.columns:
+            st.markdown(section_card_start("💀 Deceased vs Living Patients"), unsafe_allow_html=True)
+            fig, ax = plt.subplots(figsize=(8, 4))
+            fig.patch.set_facecolor('white')
+            ax.set_facecolor('#fafbff')
+            deceased_counts = claims['IsDeceased'].value_counts()
+            ax.bar(['Living', 'Deceased'], deceased_counts.values,
+                   color=['#059669', '#374151'], width=0.5, edgecolor='white')
+            ax.set_title('Living vs Deceased Patients', fontsize=13, fontweight='bold')
+            ax.set_ylabel('Count', fontsize=11)
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+            for i, v in enumerate(deceased_counts.values):
+                ax.text(i, v + 500, f'{v:,}', ha='center', fontweight='bold')
+            plt.tight_layout()
+            st.pyplot(fig)
+            plt.close()
+            st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown(section_card_start("🔥 Feature Correlation Heatmap"), unsafe_allow_html=True)
+    fig, ax = plt.subplots(figsize=(14, 7))
+    fig.patch.set_facecolor('white')
+    numeric_cols = claims.select_dtypes(include=[np.number]).columns[:15]
+    sns.heatmap(claims[numeric_cols].corr(),
+                annot=False, cmap='RdYlBu_r', ax=ax,
+                linewidths=0.5, square=False,
+                vmin=-1, vmax=1)
+    ax.set_title('Feature Correlation Matrix', fontsize=14, fontweight='bold', pad=15)
+    plt.tight_layout()
+    st.pyplot(fig)
+    plt.close()
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# ================================
+# PAGE 3 - Model Performance
+# ================================
+elif page == "🤖 Model Performance":
+
+    st.markdown(header_banner(
+        "🤖 Model Performance",
+        "XGBoost model evaluation — accuracy, confusion matrix, ROC curve and feature importance",
+        "#1a1a2e", "#16213e"
+    ), unsafe_allow_html=True)
+
+    # Use saved model directly without SMOTE
+    X = claims.drop('PotentialFraud', axis=1).fillna(0)
+    y = claims['PotentialFraud']
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42)
+
+    X_test_sc = scaler.transform(X_test)
+    y_pred = model.predict(X_test_sc)
+    y_prob = model.predict_proba(X_test_sc)[:, 1]
+    acc = round(accuracy_score(y_test, y_pred) * 100, 2)
+    fpr, tpr, _ = roc_curve(y_test, y_prob)
+    roc_auc = round(auc(fpr, tpr), 2)
+
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.markdown(metric_card("🎯 Accuracy", f"{acc}%", "#2563eb"), unsafe_allow_html=True)
+    with col2:
+        st.markdown(metric_card("📈 AUC Score", f"{roc_auc}", "#059669"), unsafe_allow_html=True)
+    with col3:
+        st.markdown(metric_card("🌲 Algorithm", "XGBoost", "#7c3aed"), unsafe_allow_html=True)
+    with col4:
+        st.markdown(metric_card("🌳 Trees", "200", "#d97706"), unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown(section_card_start("📊 Confusion Matrix"), unsafe_allow_html=True)
+        cm = confusion_matrix(y_test, y_pred)
+        fig, ax = plt.subplots(figsize=(7, 5))
+        fig.patch.set_facecolor('white')
+        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
+                    xticklabels=['Legitimate', 'Fraud'],
+                    yticklabels=['Legitimate', 'Fraud'],
+                    ax=ax, linewidths=2, linecolor='white',
+                    annot_kws={'size': 18, 'weight': 'bold'})
+        ax.set_title('Confusion Matrix', fontsize=14, fontweight='bold', pad=15)
+        ax.set_ylabel('Actual', fontsize=12, fontweight='bold')
+        ax.set_xlabel('Predicted', fontsize=12, fontweight='bold')
+        plt.tight_layout()
+        st.pyplot(fig)
+        plt.close()
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    with col2:
+        st.markdown(section_card_start("📈 ROC Curve"), unsafe_allow_html=True)
+        fig, ax = plt.subplots(figsize=(7, 5))
+        fig.patch.set_facecolor('white')
+        ax.set_facecolor('#fafbff')
+        ax.plot(fpr, tpr, color='#2563eb', linewidth=3,
+                label=f'XGBoost (AUC = {roc_auc})')
+        ax.fill_between(fpr, tpr, alpha=0.1, color='#2563eb')
+        ax.plot([0,1], [0,1], color='#9ca3af', linestyle='--',
+                linewidth=2, label='Random Guess')
+        ax.set_title('ROC Curve', fontsize=14, fontweight='bold', pad=15)
+        ax.set_xlabel('False Positive Rate', fontsize=12)
+        ax.set_ylabel('True Positive Rate', fontsize=12)
+        ax.legend(fontsize=11, loc='lower right')
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        plt.tight_layout()
+        st.pyplot(fig)
+        plt.close()
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown(section_card_start("⭐ Top 15 Important Features"), unsafe_allow_html=True)
+    feature_importance = pd.DataFrame({
+        'Feature': claims.drop('PotentialFraud', axis=1).columns,
+        'Importance': model.feature_importances_
+    }).sort_values('Importance', ascending=True).tail(15)
+
+    fig, ax = plt.subplots(figsize=(12, 7))
+    fig.patch.set_facecolor('white')
+    ax.set_facecolor('#fafbff')
+    colors_list = ['#dbeafe'] * 5 + ['#93c5fd'] * 5 + ['#2563eb'] * 5
+    bars = ax.barh(feature_importance['Feature'],
+                   feature_importance['Importance'],
+                   color=colors_list, edgecolor='white', linewidth=1)
+    ax.set_title('Top 15 Features for Fraud Detection',
+                 fontsize=14, fontweight='bold', pad=15)
+    ax.set_xlabel('Importance Score', fontsize=12)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    for bar, val in zip(bars, feature_importance['Importance']):
+        ax.text(bar.get_width() + 0.0005, bar.get_y() + bar.get_height()/2,
+                f'{val:.4f}', va='center', fontsize=9,
+                fontweight='bold', color='#374151')
+    plt.tight_layout()
+    st.pyplot(fig)
+    plt.close()
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown(section_card_start("🏆 Model Comparison"), unsafe_allow_html=True)
+    comparison_data = {
+        'Model': ['Random Forest', 'XGBoost (Best)'],
+        'Accuracy': ['83.73%', '90.28%'],
+        'AUC Score': ['0.94', '0.97'],
+        'Status': ['✅ Good', '🏆 Best Model']
+    }
+    df_comp = pd.DataFrame(comparison_data)
+    st.dataframe(df_comp, use_container_width=True, hide_index=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# ================================
+# PAGE 4 - Predict Fraud
+# ================================
+elif page == "🔍 Predict Fraud":
+
+    st.markdown(header_banner(
+        "🔍 Real-Time Fraud Prediction",
+        "Enter healthcare claim details to instantly detect whether it is fraudulent or legitimate",
+        "#1a1a2e", "#dc2626"
+    ), unsafe_allow_html=True)
+
+    feature_cols = claims.drop('PotentialFraud', axis=1).columns.tolist()
+
+    st.markdown(section_card_start("📋 Patient and Claim Information"), unsafe_allow_html=True)
+
+    st.markdown("""
+    <div style='background:#eff6ff; border-left:4px solid #2563eb;
+                border-radius:8px; padding:14px 18px; margin-bottom:20px;'>
+        <p style='color:#1e40af; font-size:13px; margin:0;'>
+        💡 Enter the claim details below. Default values are pre-filled with dataset averages.
+        Modify values as needed and click the Predict button.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.markdown("**👤 Patient Details**")
+        age = st.number_input("Patient Age", min_value=0, max_value=120, value=70, step=1)
+        is_deceased = st.selectbox("Is Patient Deceased?",
+                                    options=[0, 1],
+                                    format_func=lambda x: "❌ No" if x == 0 else "✅ Yes")
+        ip_annual_reimb = st.number_input("IP Annual Reimbursement ($)",
+                                           min_value=0, value=15000, step=500)
+
+    with col2:
+        st.markdown("**💰 Claim Details**")
+        claim_amount = st.number_input("Claim Amount ($)",
+                                        min_value=0, value=8000, step=100)
+        claim_duration = st.number_input("Claim Duration (days)",
+                                          min_value=0, value=14, step=1)
+        deductible = st.number_input("Deductible Amount ($)",
+                                      min_value=0, value=1068, step=100)
+
+    with col3:
+        st.markdown("**🏥 Hospital Details**")
+        hospital_stay = st.number_input("Hospital Stay (days)",
+                                         min_value=0, value=7, step=1)
+        op_annual_reimb = st.number_input("OP Annual Reimbursement ($)",
+                                           min_value=0, value=4000, step=500)
+        num_physicians = st.number_input("Number of Physicians",
+                                          min_value=0, value=3, step=1)
+
+    st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        predict_btn = st.button("🔍 PREDICT FRAUD NOW", use_container_width=True)
+
+    if predict_btn:
+        base_input = claims.drop('PotentialFraud', axis=1).mean().to_dict()
+
+        user_inputs = {
+            'Age': age,
+            'IsDeceased': is_deceased,
+            'InscClaimAmtReimbursed': claim_amount,
+            'ClaimDuration': claim_duration,
+            'DeductibleAmtPaid': deductible,
+            'HospitalStayDays': hospital_stay,
+            'IPAnnualReimbursementAmt': ip_annual_reimb,
+            'OPAnnualReimbursementAmt': op_annual_reimb,
+        }
+
+        for key, val in user_inputs.items():
+            if key in base_input:
+                base_input[key] = val
+
+        input_array = np.array([[base_input[col] for col in feature_cols]])
+        input_array = np.nan_to_num(input_array, nan=0.0)
+        input_scaled = scaler.transform(input_array)
+
+        prediction = model.predict(input_scaled)[0]
+        probability = model.predict_proba(input_scaled)[0][1]
+        fraud_pct = round(probability * 100, 2)
+        legit_pct = round((1 - probability) * 100, 2)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        if prediction == 1:
+            st.markdown(f"""
+            <div style='background:linear-gradient(135deg, #fef2f2, #fee2e2);
+                        border:2px solid #dc2626; border-radius:16px;
+                        padding:28px; text-align:center;
+                        box-shadow:0 8px 30px rgba(220,38,38,0.2);'>
+                <div style='font-size:48px; margin-bottom:8px;'>🚨</div>
+                <div style='font-size:26px; font-weight:800; color:#dc2626; margin-bottom:8px;'>
+                    FRAUD DETECTED!
+                </div>
+                <div style='font-size:16px; color:#b91c1c; font-weight:600; margin-bottom:4px;'>
+                    Fraud Probability: {fraud_pct}%
+                </div>
+                <div style='font-size:13px; color:#9b1c1c; margin-top:10px;'>
+                    This claim has been flagged as potentially fraudulent. Immediate review required.
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.markdown(f"""
+            <div style='background:linear-gradient(135deg, #f0fdf4, #dcfce7);
+                        border:2px solid #059669; border-radius:16px;
+                        padding:28px; text-align:center;
+                        box-shadow:0 8px 30px rgba(5,150,105,0.2);'>
+                <div style='font-size:48px; margin-bottom:8px;'>✅</div>
+                <div style='font-size:26px; font-weight:800; color:#059669; margin-bottom:8px;'>
+                    CLAIM IS LEGITIMATE
+                </div>
+                <div style='font-size:16px; color:#047857; font-weight:600; margin-bottom:4px;'>
+                    Fraud Probability: {fraud_pct}%
+                </div>
+                <div style='font-size:13px; color:#065f46; margin-top:10px;'>
+                    No fraudulent activity detected. This claim appears to be legitimate.
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown(section_card_start("📊 Prediction Probability"), unsafe_allow_html=True)
+            fig, ax = plt.subplots(figsize=(7, 3))
+            fig.patch.set_facecolor('white')
+            ax.set_facecolor('white')
+            categories = ['Legitimate', 'Fraud']
+            values = [legit_pct, fraud_pct]
+            colors_bar = ['#059669', '#dc2626']
+            bars = ax.bar(categories, values, color=colors_bar,
+                          width=0.4, edgecolor='white', linewidth=2)
+            for bar, val in zip(bars, values):
+                ax.text(bar.get_x() + bar.get_width()/2,
+                        bar.get_height() + 0.5,
+                        f'{val}%', ha='center',
+                        fontweight='bold', fontsize=14)
+            ax.set_ylim(0, 115)
+            ax.set_ylabel('Probability (%)', fontsize=11)
+            ax.set_title('Prediction Probability', fontsize=13, fontweight='bold')
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+            plt.tight_layout()
+            st.pyplot(fig)
+            plt.close()
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        with col2:
+            st.markdown(section_card_start("📋 Claim Summary"), unsafe_allow_html=True)
+            summary = {
+                'Field': [
+                    'Patient Age', 'Is Deceased', 'Claim Amount',
+                    'Claim Duration', 'Deductible', 'Hospital Stay',
+                    'Physicians', 'IP Annual Reimbursement',
+                    'OP Annual Reimbursement', 'Prediction', 'Fraud Probability'
+                ],
+                'Value': [
+                    f'{age} years',
+                    'Yes' if is_deceased == 1 else 'No',
+                    f'${claim_amount:,}',
+                    f'{claim_duration} days',
+                    f'${deductible:,}',
+                    f'{hospital_stay} days',
+                    str(num_physicians),
+                    f'${ip_annual_reimb:,}',
+                    f'${op_annual_reimb:,}',
+                    '🚨 FRAUD' if prediction == 1 else '✅ LEGITIMATE',
+                    f'{fraud_pct}%'
+                ]
+            }
+            df_summary = pd.DataFrame(summary)
+            st.dataframe(df_summary, use_container_width=True, hide_index=True)
+            st.markdown("</div>", unsafe_allow_html=True)
