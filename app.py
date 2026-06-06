@@ -89,10 +89,10 @@ div[data-testid="stExpander"] {
 # =====================================================
 @st.cache_data
 def load_data():
-    df = pd.read_csv("cleaned_data.csv", low_memory=False)
+    df = pd.read_csv("dashboard_data.csv", low_memory=False)
 
     if "PotentialFraud" not in df.columns:
-        st.error("PotentialFraud column not found in cleaned_data.csv")
+        st.error("PotentialFraud column not found in dashboard_data.csv")
         st.stop()
 
     if df["PotentialFraud"].dtype == "object":
