@@ -133,7 +133,7 @@ jupyter notebook ModelBuilding.ipynb
 streamlit run app.py
 
 ## 🌐 Live Demo
-Click here to view live dashboard - Update this link after deployment
+[🚀 Click here to view live dashboard](https://healthcare-fraud-detection-sonika.streamlit.app/)
 
 📄 License This project is licensed under the MIT License.
 
